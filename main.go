@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"runtime"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/go-sql-driver/mysql"
 	"github.com/greg0/go-mysqldump"
+	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -24,10 +26,27 @@ const (
 
 	// Error Messages
 	Error = 1 << iota // c == 4
+
+	cName = "dump"
+
+	cAddr = "127.0.0.1:3306"
+
+	cUsr = "root"
+
+	cPwd = "root"
 )
+
+type ConnectionConfig struct {
+	ConnName string `yaml:"name"`
+	Address  string `yaml:"address"`
+	UserName string `yaml:"username"`
+	Password string `yaml:"password"`
+	Database string `yaml:"dbname"`
+}
 
 // Options model for commandline arguments
 type Options struct {
+	ConnName            string
 	Address             string
 	UserName            string
 	Password            string
@@ -38,6 +57,7 @@ type Options struct {
 }
 
 func main() {
+
 	options := GetOptions()
 
 	// Open connection to database
@@ -48,14 +68,13 @@ func main() {
 	config.Net = "tcp"
 	config.Addr = options.Address
 
-	dumpFilenameFormat := fmt.Sprintf("%s-2006-01-02T15:04:05", config.DBName) // accepts time layout string and add .sql at the end of file
-
 	db, err := sql.Open("mysql", config.FormatDSN())
 	if err != nil {
 		fmt.Println("Error opening database: ", err)
 		return
 	}
 
+	dumpFilenameFormat := fmt.Sprintf("%s-%s-2006-01-02T15:04:05", options.ConnName, config.DBName) // accepts time layout string and add .sql at the end of file
 	// Register database with mysqldump
 	dumper, err := mysqldump.Register(
 		db,
@@ -73,6 +92,8 @@ func main() {
 	err = dumper.Dump()
 	if err != nil {
 		fmt.Println("Error dumping:", err)
+		fmt.Println("Removing dump file")
+		os.Remove(dumper.File.Name())
 		return
 	}
 	fmt.Printf("File is saved to %s/%s", options.OutputDirectory, dumpFilenameFormat)
@@ -84,16 +105,19 @@ func main() {
 func GetOptions() *Options {
 
 	var connection string
-	flag.StringVar(&connection, "connection", "", "Yaml config with connection parameters. Optional")
+	flag.StringVar(&connection, "connection", "", "Yaml config with connection parameters. Overrides flag arguments. Optional")
+
+	var connName string
+	flag.StringVar(&connName, "name", cName, "Dump name. Default 'dump' ")
 
 	var address string
-	flag.StringVar(&address, "addr", "127.0.0.1:3306", "Database address host:port")
+	flag.StringVar(&address, "addr", cAddr, "Database address host:port")
 
 	var username string
-	flag.StringVar(&username, "user", "root", "Database username")
+	flag.StringVar(&username, "user", cUsr, "Database username")
 
 	var password string
-	flag.StringVar(&password, "pass", "root", "Database password")
+	flag.StringVar(&password, "pass", cPwd, "Database password")
 
 	var database string
 	flag.StringVar(&database, "dbname", "", "Database name")
@@ -107,14 +131,27 @@ func GetOptions() *Options {
 	var outputdir string
 	flag.StringVar(&outputdir, "output", "", "Dump output dir. Default is current working directory")
 
+	if len(os.Args) <= 1 || os.Args[1] == "--help" {
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
 	flag.Parse()
+
+	if connection != "" {
+		var c ConnectionConfig
+		c.loadFile(connection)
+
+		connName = c.ConnName
+		address = c.Address
+		username = c.UserName
+		password = c.Password
+		database = c.Database
+	}
 
 	if outputdir == "" {
 		dir, err := os.Getwd()
-		if err != nil {
-			printMessage(err.Error(), Error)
-		}
-
+		checkErr(err)
 		outputdir = dir
 	}
 
@@ -133,7 +170,9 @@ func GetOptions() *Options {
 		structOnlyTablesArray = FillArrayWithFileLines(structOnlyTables)
 	}
 
-	opts := NewOptions(
+	var o Options
+	opts := o.create(
+		connName,
 		address,
 		username,
 		password,
@@ -141,6 +180,7 @@ func GetOptions() *Options {
 		ignoredTablesArray,
 		structOnlyTablesArray,
 		outputdir)
+
 	stropts, _ := json.MarshalIndent(opts, "", "\t")
 	printMessage("Running with parameters", Info)
 	printMessage(string(stropts), Info)
@@ -165,7 +205,7 @@ func FillArrayWithFileLines(filePath string) []string {
 	return array
 }
 
-func NewOptions(address string, username string, password string, database string, ignoredTables []string, structOnlyTables []string, outputDir string) *Options {
+func (o *Options) create(name string, address string, username string, password string, database string, ignoredTables []string, structOnlyTables []string, outputDir string) *Options {
 
 	database = strings.Replace(database, " ", "", -1)
 	database = strings.Replace(database, " , ", ",", -1)
@@ -173,6 +213,7 @@ func NewOptions(address string, username string, password string, database strin
 	database = strings.Replace(database, " ,", ",", -1)
 
 	return &Options{
+		ConnName:            name,
 		Address:             address,
 		UserName:            username,
 		Password:            password,
@@ -196,4 +237,18 @@ func checkErr(err error) {
 		panic(err)
 		color.Unset()
 	}
+}
+
+func (c *ConnectionConfig) loadFile(filePath string) *ConnectionConfig {
+	c.ConnName = cName
+	c.Address = cAddr
+	c.UserName = cUsr
+	c.Password = cPwd
+
+	yamlFile, err := ioutil.ReadFile(filePath)
+	checkErr(err)
+	err = yaml.Unmarshal(yamlFile, c)
+	checkErr(err)
+
+	return c
 }
