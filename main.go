@@ -54,6 +54,7 @@ type Options struct {
 	IgnoredTables       []string
 	StructureOnlyTables []string
 	OutputDirectory     string
+	PacketSize          int
 }
 
 func main() {
@@ -82,6 +83,7 @@ func main() {
 		dumpFilenameFormat,
 		options.StructureOnlyTables,
 		options.IgnoredTables,
+		options.PacketSize,
 	)
 	if err != nil {
 		fmt.Println("Error registering databse:", err)
@@ -131,6 +133,9 @@ func GetOptions() *Options {
 	var outputdir string
 	flag.StringVar(&outputdir, "output", "", "Dump output dir. Default is current working directory")
 
+	var packetSize int
+	flag.IntVar(&packetSize, "packetSize", 1048576, "Max allowed packet size. Default 1048576 (1MB)")
+
 	if len(os.Args) <= 1 || os.Args[1] == "--help" {
 		flag.PrintDefaults()
 		os.Exit(1)
@@ -179,7 +184,8 @@ func GetOptions() *Options {
 		database,
 		ignoredTablesArray,
 		structOnlyTablesArray,
-		outputdir)
+		outputdir,
+		packetSize)
 
 	stropts, _ := json.MarshalIndent(opts, "", "\t")
 	printMessage("Running with parameters", Info)
@@ -205,7 +211,7 @@ func FillArrayWithFileLines(filePath string) []string {
 	return array
 }
 
-func (o *Options) create(name string, address string, username string, password string, database string, ignoredTables []string, structOnlyTables []string, outputDir string) *Options {
+func (o *Options) create(name string, address string, username string, password string, database string, ignoredTables []string, structOnlyTables []string, outputDir string, packetSize int) *Options {
 
 	database = strings.Replace(database, " ", "", -1)
 	database = strings.Replace(database, " , ", ",", -1)
@@ -221,6 +227,7 @@ func (o *Options) create(name string, address string, username string, password 
 		IgnoredTables:       ignoredTables,
 		StructureOnlyTables: structOnlyTables,
 		OutputDirectory:     outputDir,
+		PacketSize:          packetSize,
 	}
 }
 
